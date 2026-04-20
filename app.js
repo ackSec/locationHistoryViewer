@@ -35,22 +35,32 @@
     status.textContent = 'Reading files…';
     try {
       const files = await LHParser.readFileList(fileList, (msg) => { status.textContent = msg; });
-      if (!files.length) { status.textContent = 'No JSON found. Include Records.json, location-history.json, or a Semantic Location History folder.'; return; }
-      status.textContent = `Parsing ${files.length} file(s)…`;
+      if (!files.length) { status.textContent = 'No JSON found. Include Records.json, location-history.json, a Semantic Location History folder, or a consolidated-location-history.json.'; return; }
+      const totalBytes = files.reduce((s, f) => s + f.text.length, 0);
+      const mb = (totalBytes / 1048576).toFixed(0);
+      status.textContent = `Parsing ${mb} MB of JSON… (can take 10–20s on large files)`;
       await new Promise(r => setTimeout(r, 30)); // let UI paint
       const parsed = LHParser.parseAll(files);
       if (!parsed.visits.length && !parsed.segments.length && !parsed.rawPoints.length) {
         status.textContent = 'No location data found in these files.'; return;
       }
-      status.textContent = 'Deriving timeline…';
+      status.textContent = `Building timeline from ${parsed.rawPoints.length.toLocaleString()} raw pings + ${parsed.visits.length.toLocaleString()} visits + ${parsed.segments.length.toLocaleString()} trips…`;
       await new Promise(r => setTimeout(r, 10));
       data = LHDerive.derive(parsed);
-      status.textContent = `Loaded ${parsed.visits.length} visits · ${parsed.segments.length} trips · ${parsed.formatsFound.join(', ')}`;
+      const span = fmtRange(data.t0, data.t1);
+      const gaps = (data.dataRanges && data.dataRanges.length > 1) ? ` · ${data.dataRanges.length} data eras` : '';
+      status.textContent = `Loaded ${span}${gaps} · ${parsed.formatsFound.join(', ')}`;
       await onDataLoaded();
     } catch (err) {
       console.error(err);
       status.textContent = 'Error: ' + (err && err.message ? err.message : String(err));
     }
+  }
+
+  function fmtRange(t0, t1) {
+    const a = new Date(t0).getUTCFullYear();
+    const b = new Date(t1).getUTCFullYear();
+    return a === b ? String(a) : `${a}–${b}`;
   }
 
   async function onDataLoaded() {

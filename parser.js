@@ -20,11 +20,13 @@ const LHParser = (() => {
 
   function e7(v) { return v / 1e7; }
 
-  // new format uses "37.7749°, -122.4194°" strings
+  // new format uses "37.7749°, -122.4194°" strings OR "geo:37.7749,-122.4194"
   function parseLatLngString(s) {
     if (!s) return null;
     if (typeof s === 'object' && s.latitude !== undefined) return { lat: s.latitude, lng: s.longitude };
-    const m = String(s).match(/(-?\d+(?:\.\d+)?)[^\-\d]+(-?\d+(?:\.\d+)?)/);
+    let str = String(s);
+    if (str.startsWith('geo:')) str = str.slice(4);
+    const m = str.match(/(-?\d+(?:\.\d+)?)[^\-\d]+(-?\d+(?:\.\d+)?)/);
     if (!m) return null;
     return { lat: parseFloat(m[1]), lng: parseFloat(m[2]) };
   }
@@ -97,6 +99,9 @@ const LHParser = (() => {
   function parseRecords(json, out) {
     const arr = json.locations || [];
     for (const r of arr) {
+      // spec: coords outside ±900000000 E7 (lat) / ±1800000000 E7 (lng) are invalid
+      if (r.latitudeE7 !== undefined && Math.abs(r.latitudeE7) > 900000000) continue;
+      if (r.longitudeE7 !== undefined && Math.abs(r.longitudeE7) > 1800000000) continue;
       const loc = readLocation(r);
       if (!loc) continue;
       const t = parseTime(r.timestampMs || r.timestamp);
@@ -178,7 +183,97 @@ const LHParser = (() => {
     }
   }
 
-  // (3) New on-device format.
+  // Coerce stringified numbers ("0.95" → 0.95) that are common in iPhone Timeline exports.
+  function numish(v, def) {
+    if (v === undefined || v === null) return def;
+    if (typeof v === 'number') return v;
+    const n = parseFloat(v);
+    return isFinite(n) ? n : def;
+  }
+
+  // (4) iPhone Timeline format (2024+): each entry has startTime/endTime and one of
+  //     visit / activity / timelinePath. geo: strings, stringified numbers, placeID (no placeName).
+  function parseIPhoneTimelineEntry(entry, out) {
+    const t0 = parseTime(entry.startTime);
+    const t1 = parseTime(entry.endTime);
+    if (t0 === null || t1 === null) return;
+
+    if (entry.visit) {
+      const v = entry.visit;
+      const cand = v.topCandidate || {};
+      const loc = parseLatLngString(cand.placeLocation);
+      if (!loc) return;
+      const semanticType = cand.semanticType;
+      // No place name or address in this format — use semanticType as a display label.
+      const niceName = semanticType && semanticType !== 'Unknown' ? semanticType : null;
+      out.visits.push({
+        t0, t1,
+        lat: loc.lat, lng: loc.lng,
+        name: niceName,
+        address: null,
+        country: null, city: null,
+        semanticType,
+        placeId: cand.placeID,
+        confidence: numish(v.probability, numish(cand.probability, 0.6)),
+      });
+      return;
+    }
+    if (entry.activity) {
+      const a = entry.activity;
+      const start = parseLatLngString(a.start);
+      const end = parseLatLngString(a.end);
+      if (!start || !end) return;
+      const type = normalizeActivity(a.topCandidate && a.topCandidate.type);
+      const points = [
+        { t: t0, lat: start.lat, lng: start.lng },
+        { t: t1, lat: end.lat, lng: end.lng },
+      ];
+      out.segments.push({
+        t0, t1,
+        type,
+        distance: numish(a.distanceMeters, 0),
+        confidence: numish(a.topCandidate && a.topCandidate.probability, numish(a.probability, 0.6)),
+        points,
+        startLat: start.lat, startLng: start.lng,
+        endLat: end.lat, endLng: end.lng,
+        isFlight: type === 'FLYING',
+      });
+      return;
+    }
+    if (Array.isArray(entry.timelinePath) && entry.timelinePath.length) {
+      const points = [];
+      for (const p of entry.timelinePath) {
+        const pl = parseLatLngString(p.point);
+        if (!pl) continue;
+        const off = numish(p.durationMinutesOffsetFromStartTime, 0) * 60 * 1000;
+        points.push({ t: t0 + off, lat: pl.lat, lng: pl.lng });
+      }
+      if (points.length >= 2) {
+        out.segments.push({
+          t0, t1,
+          type: 'UNKNOWN',
+          distance: 0,
+          confidence: 0.5,
+          points,
+          startLat: points[0].lat, startLng: points[0].lng,
+          endLat: points[points.length - 1].lat, endLng: points[points.length - 1].lng,
+          isFlight: false,
+        });
+      }
+    }
+  }
+
+  // (5) Consolidated envelope: { legacy_records: [...], timeline: [...] }
+  function parseConsolidated(json, out) {
+    if (Array.isArray(json.legacy_records)) {
+      parseRecords({ locations: json.legacy_records }, out);
+    }
+    if (Array.isArray(json.timeline)) {
+      for (const entry of json.timeline) parseIPhoneTimelineEntry(entry, out);
+    }
+  }
+
+  // (3) Legacy "new" format (2024 Android on-device export).
   //   Top level: { semanticSegments: [...], rawSignals: [...] }
   //   Each semanticSegment has startTime, endTime, and one of: visit, activity, timelinePath.
   function parseTimelineNew(json, out) {
@@ -261,15 +356,14 @@ const LHParser = (() => {
 
   function detectFormat(json) {
     if (!json || typeof json !== 'object') return null;
+    // Consolidated: { legacy_records, timeline } — must come before the individual checks
+    if (Array.isArray(json.legacy_records) || (Array.isArray(json.timeline) && json.sources)) return 'consolidated';
     if (Array.isArray(json.locations)) return 'records';
     if (Array.isArray(json.timelineObjects)) return 'semantic-legacy';
     if (Array.isArray(json.semanticSegments)) return 'timeline-new';
-    // Some exports wrap the new format in other top-level keys
-    if (Array.isArray(json)) {
-      // Some on-device exports are a raw array of semantic segments
-      if (json.length && (json[0].startTime || json[0].visit || json[0].activity || json[0].timelinePath)) {
-        return 'timeline-new-array';
-      }
+    // Raw array of iPhone timeline entries
+    if (Array.isArray(json) && json.length && (json[0].startTime || json[0].visit || json[0].activity || json[0].timelinePath)) {
+      return 'iphone-timeline-array';
     }
     return null;
   }
@@ -279,10 +373,14 @@ const LHParser = (() => {
   // Parse one JSON object based on detected format.
   function parseOne(json, out) {
     const fmt = detectFormat(json);
+    if (fmt === 'consolidated') { parseConsolidated(json, out); return fmt; }
     if (fmt === 'records') { parseRecords(json, out); return fmt; }
     if (fmt === 'semantic-legacy') { parseSemanticMonth(json, out); return fmt; }
     if (fmt === 'timeline-new') { parseTimelineNew(json, out); return fmt; }
-    if (fmt === 'timeline-new-array') { parseTimelineNew({ semanticSegments: json }, out); return fmt; }
+    if (fmt === 'iphone-timeline-array') {
+      for (const entry of json) parseIPhoneTimelineEntry(entry, out);
+      return fmt;
+    }
     return null;
   }
 
@@ -333,6 +431,24 @@ const LHParser = (() => {
 
   // ---------- file list ingestion (dropped files, file picker) ----------
 
+  // Read a single file with byte-level progress via FileReader (ProgressEvent).
+  // Returns a string.
+  function readTextWithProgress(file, progress) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onprogress = (e) => {
+        if (progress && e.lengthComputable) {
+          const mb = (e.loaded / 1048576).toFixed(1);
+          const total = (e.total / 1048576).toFixed(0);
+          progress(`Reading ${file.name}: ${mb} / ${total} MB`);
+        }
+      };
+      reader.onerror = () => reject(reader.error);
+      reader.onload = () => resolve(reader.result);
+      reader.readAsText(file);
+    });
+  }
+
   async function readFileList(fileList, progress) {
     const out = [];
     const files = Array.from(fileList);
@@ -345,7 +461,7 @@ const LHParser = (() => {
         });
         out.push(...contents);
       } else if (lower.endsWith('.json')) {
-        const text = await file.text();
+        const text = await readTextWithProgress(file, progress);
         out.push({ name: file.name, text });
       }
       done++;

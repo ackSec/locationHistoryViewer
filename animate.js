@@ -102,24 +102,27 @@ const LHAnimate = (() => {
     document.getElementById('year-watermark').textContent = String(year);
 
     const placeEl = document.getElementById('hud-place');
+    let label = null;
     if (activeEntry && activeEntry.kind === 'visit') {
       const v = data.visits[activeEntry.i];
       const dur = v.t1 - v.t0;
-      if (v.name && dur > 1000 * 60 * 60) {
-        placeEl.textContent = v.name;
-        placeEl.classList.add('show');
-      } else {
-        placeEl.classList.remove('show');
+      if (dur > 1000 * 60 * 15) {
+        if (v.name) label = v.name;
+        else if (v.semanticType && v.semanticType !== 'Unknown') label = v.semanticType;
+        else label = `Stop · ${fmtDuration(dur)}`;
       }
     } else if (activeEntry && activeEntry.kind === 'segment') {
       const s = data.segments[activeEntry.i];
-      const km = LHDerive.segmentKm ? LHDerive.segmentKm(s) : 0;
+      const km = LHDerive.segmentKm(s);
       if (s.type && s.type !== 'UNKNOWN') {
-        placeEl.textContent = `${titleCase(s.type)} · ${km.toFixed(1)} km`;
-        placeEl.classList.add('show');
-      } else {
-        placeEl.classList.remove('show');
+        label = `${titleCase(s.type)} · ${km.toFixed(1)} km`;
+      } else if (km > 0.5) {
+        label = `${km.toFixed(1)} km`;
       }
+    }
+    if (label) {
+      placeEl.textContent = label;
+      placeEl.classList.add('show');
     } else {
       placeEl.classList.remove('show');
     }
@@ -133,6 +136,14 @@ const LHAnimate = (() => {
 
   function titleCase(s) {
     return String(s).replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+  }
+
+  function fmtDuration(ms) {
+    const h = Math.floor(ms / 3600000);
+    const m = Math.floor((ms % 3600000) / 60000);
+    if (h >= 24) return `${Math.floor(h / 24)}d ${h % 24}h`;
+    if (h) return `${h}h ${m}m`;
+    return `${m}m`;
   }
 
   // ===== Event firing (banners) =====
@@ -173,6 +184,19 @@ const LHAnimate = (() => {
       const prevTime = state.currentTime;
       // speedSec = real-world seconds covered per 1s of wall clock
       state.currentTime = Math.min(data.t1, state.currentTime + state.speedSec * 1000 * (dtMs / 1000));
+      // Auto-skip long empty gaps: if currentTime is past the end of a data range and before
+      // the start of the next, jump to the next range's start.
+      if (data.dataRanges && data.dataRanges.length > 1) {
+        for (let i = 0; i < data.dataRanges.length - 1; i++) {
+          const here = data.dataRanges[i], next = data.dataRanges[i + 1];
+          if (state.currentTime > here.t1 && state.currentTime < next.t0) {
+            const years = ((next.t0 - here.t1) / (365.25 * 86400000)).toFixed(1);
+            state.currentTime = next.t0;
+            showBanner(fmtDate(next.t0), `Skipped ${years}-year gap`);
+            break;
+          }
+        }
+      }
       render(prevTime);
       if (state.currentTime >= data.t1) {
         state.playing = false;

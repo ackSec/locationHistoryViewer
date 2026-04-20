@@ -9,8 +9,14 @@
 
 const LHDerive = (() => {
 
-  const GAP_MS = 6 * 3600 * 1000;   // 6 hours of silence → gap candidate
-  const GAP_KM = 5;                 // only draw gap line if the two endpoints are > 5 km apart
+  const GAP_MS = 6 * 3600 * 1000;     // 6 hours of silence → gap candidate
+  const GAP_KM = 5;                   // only draw gap line if the two endpoints are > 5 km apart
+  const BIG_GAP_MS = 30 * 86400000;   // 30 days → auto-skip during playback
+  const RAW_MIN_DT_MS = 2 * 60 * 1000;    // downsample raw pings: keep if > 2 min apart
+  const RAW_MIN_KM = 0.1;                 // ... OR > 100 m apart
+  const RAW_TRIP_BREAK_MS = 30 * 60 * 1000; // raw ping gap > 30 min → end current trip
+  const RAW_TRIP_BREAK_KM = 5;              // raw ping jump > 5 km → end current trip
+  const RAW_ACCURACY_LIMIT = 200;          // drop pings with accuracy > 200 m
 
   function haversineKm(a, b) {
     const R = 6371, toRad = Math.PI / 180;
@@ -63,10 +69,72 @@ const LHDerive = (() => {
     return result;
   }
 
+  // Synthesize trips from raw GPS pings:
+  //   1. drop poor-accuracy pings
+  //   2. downsample by time AND distance
+  //   3. split into trips on big gaps (time or distance)
+  //   4. emit each trip as an UNKNOWN-type segment
+  function synthesizeSegmentsFromRaw(rawPoints) {
+    if (!rawPoints.length) return [];
+    const kept = [];
+    let lastKept = null;
+    for (const p of rawPoints) {
+      if (p.accuracy && p.accuracy > RAW_ACCURACY_LIMIT) continue;
+      if (!lastKept) { kept.push(p); lastKept = p; continue; }
+      const dt = p.t - lastKept.t;
+      const dkm = haversineKm(lastKept, p);
+      if (dt >= RAW_MIN_DT_MS || dkm >= RAW_MIN_KM) {
+        kept.push(p);
+        lastKept = p;
+      }
+    }
+
+    const segments = [];
+    let buf = [];
+    const flushTrip = () => {
+      if (buf.length >= 2) {
+        const first = buf[0], last = buf[buf.length - 1];
+        let pathKm = 0;
+        for (let i = 1; i < buf.length; i++) pathKm += haversineKm(buf[i - 1], buf[i]);
+        segments.push({
+          t0: first.t, t1: last.t,
+          type: 'UNKNOWN',
+          distance: pathKm * 1000, // meters
+          confidence: 0.5,
+          points: buf.map(p => ({ t: p.t, lat: p.lat, lng: p.lng })),
+          startLat: first.lat, startLng: first.lng,
+          endLat: last.lat, endLng: last.lng,
+          isFlight: false,
+          synthesized: true,
+        });
+      }
+      buf = [];
+    };
+    for (const p of kept) {
+      if (!buf.length) { buf.push(p); continue; }
+      const last = buf[buf.length - 1];
+      const dt = p.t - last.t;
+      const dkm = haversineKm(last, p);
+      if (dt > RAW_TRIP_BREAK_MS || dkm > RAW_TRIP_BREAK_KM) {
+        flushTrip();
+      }
+      buf.push(p);
+    }
+    flushTrip();
+    return segments;
+  }
+
   function derive(parsed) {
     parsed.visits.sort((a, b) => a.t0 - b.t0);
     parsed.segments.sort((a, b) => a.t0 - b.t0);
     parsed.rawPoints.sort((a, b) => a.t - b.t);
+
+    // Merge synthesized raw trips into segments so the legacy-records era renders as trails.
+    if (parsed.rawPoints.length) {
+      const synth = synthesizeSegmentsFromRaw(parsed.rawPoints);
+      parsed.segments = parsed.segments.concat(synth);
+      parsed.segments.sort((a, b) => a.t0 - b.t0);
+    }
 
     const starts = [];
     const ends = [];
@@ -134,6 +202,24 @@ const LHDerive = (() => {
       cumulative.push({ t: ent.t, km, flights, countries: countries.size, places: places.size });
     }
 
+    // Contiguous data ranges — used by the playback loop to auto-skip long empty stretches.
+    const dataRanges = [];
+    if (timeline.length) {
+      let curStart = timeline[0].t0;
+      let curEnd = timeline[0].t1;
+      for (let i = 1; i < timeline.length; i++) {
+        const e = timeline[i];
+        if (e.t0 - curEnd > BIG_GAP_MS) {
+          dataRanges.push({ t0: curStart, t1: curEnd });
+          curStart = e.t0;
+          curEnd = e.t1;
+        } else {
+          curEnd = Math.max(curEnd, e.t1);
+        }
+      }
+      dataRanges.push({ t0: curStart, t1: curEnd });
+    }
+
     const homeBase = computeHomeBase(parsed.visits);
     let prevHomeBase = null;
     for (const h of homeBase) {
@@ -144,7 +230,7 @@ const LHDerive = (() => {
     }
     events.sort((a, b) => a.t - b.t);
 
-    return { ...parsed, t0, t1, timeline, gaps, events, cumulative, homeBase, segmentKm: segmentKm };
+    return { ...parsed, t0, t1, timeline, gaps, events, cumulative, homeBase, dataRanges, segmentKm: segmentKm };
   }
 
   // binary-search the last cumulative entry with t <= currentTime
