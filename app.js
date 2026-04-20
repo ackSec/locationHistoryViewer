@@ -11,6 +11,49 @@
     speedSec: 604800, // 1 week of simulated time per real second (gentle default)
   };
 
+  // ===== On-page debug panel =====
+  // Exposed globally so error boundaries in animate.js / render.js can log into it.
+  const Debug = {
+    lines: [],
+    errCount: 0,
+    set(html) {
+      const el = document.getElementById('debug-body');
+      if (el) el.innerHTML = html;
+    },
+    append(html) {
+      this.lines.push(html);
+      if (this.lines.length > 30) this.lines.shift();
+      const el = document.getElementById('debug-body');
+      if (el) el.innerHTML = this.lines.join('\n');
+    },
+    error(where, err) {
+      this.errCount++;
+      const msg = err && err.stack ? err.stack.split('\n').slice(0, 4).join('\n') : String(err);
+      const line = `<span class="err">[ERR ${this.errCount}] ${escapeHtml(where)}:</span>\n${escapeHtml(msg)}`;
+      this.append(line);
+    },
+    info(line) {
+      this.append(`<span class="k">${escapeHtml(line)}</span>`);
+    },
+  };
+  window.__Debug = Debug;
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+  }
+
+  function wireDebugToggle() {
+    const btn = document.getElementById('debug-toggle');
+    const panel = document.getElementById('debug');
+    if (!btn || !panel) return;
+    btn.addEventListener('click', () => {
+      panel.classList.toggle('collapsed');
+      btn.textContent = panel.classList.contains('collapsed') ? 'show' : 'hide';
+    });
+  }
+
   // ===== Map =====
   function initMap() {
     map = new maplibregl.Map({
@@ -42,15 +85,25 @@
       await new Promise(r => setTimeout(r, 30)); // let UI paint
       const parsed = LHParser.parseAll(files);
 
-      // Always log what we saw — essential for debugging real files
-      console.log('[LH] parse result:', {
-        formatsFound: parsed.formatsFound,
-        rawPoints: parsed.rawPoints.length,
-        visits: parsed.visits.length,
-        segments: parsed.segments.length,
-        perFileCounts: parsed.perFileCounts,
-        parseErrors: parsed.parseErrors,
-      });
+      // Surface what we parsed both to the on-page panel and console
+      const parseSummary = [
+        `<span class="k">formats:</span> <span class="v">${parsed.formatsFound.join(', ') || 'none'}</span>`,
+        `<span class="k">raw pings:</span> <span class="v">${parsed.rawPoints.length.toLocaleString()}</span>`,
+        `<span class="k">visits:</span> <span class="v">${parsed.visits.length.toLocaleString()}</span>`,
+        `<span class="k">segments:</span> <span class="v">${parsed.segments.length.toLocaleString()}</span>`,
+      ];
+      if (parsed.perFileCounts && parsed.perFileCounts.length) {
+        for (const f of parsed.perFileCounts) {
+          parseSummary.push(`  <span class="k">${escapeHtml(f.name)}</span>: fmt=${f.format} legacy=${f.legacyRecordsLen} timeline=${f.timelineLen} +raw=${f.rawAdded} +visits=${f.visitsAdded} +segs=${f.segmentsAdded}`);
+        }
+      }
+      if (parsed.parseErrors && parsed.parseErrors.length) {
+        for (const e of parsed.parseErrors) {
+          parseSummary.push(`<span class="err">parse error in ${escapeHtml(e.name)} (${(e.bytes / 1048576).toFixed(0)} MB): ${escapeHtml(e.error)}</span>`);
+        }
+      }
+      Debug.set(parseSummary.join('\n'));
+      console.log('[LH] parse result:', parsed);
 
       if (parsed.parseErrors && parsed.parseErrors.length) {
         const e = parsed.parseErrors[0];
@@ -58,22 +111,28 @@
         return;
       }
       if (!parsed.visits.length && !parsed.segments.length && !parsed.rawPoints.length) {
-        status.textContent = 'No location data found in these files. Check console for details.'; return;
+        status.textContent = 'No location data found in these files.'; return;
       }
       status.textContent = `Read ${parsed.rawPoints.length.toLocaleString()} raw pings · ${parsed.visits.length.toLocaleString()} visits · ${parsed.segments.length.toLocaleString()} trips. Building timeline…`;
       await new Promise(r => setTimeout(r, 10));
       data = LHDerive.derive(parsed);
-      console.log('[LH] derive result:', {
-        t0: new Date(data.t0).toISOString(),
-        t1: new Date(data.t1).toISOString(),
-        spanYears: ((data.t1 - data.t0) / (365.25 * 86400000)).toFixed(2),
-        segmentsTotal: data.segments.length,
-        dataRanges: data.dataRanges.map(r => ({
-          start: new Date(r.t0).toISOString().slice(0, 10),
-          end:   new Date(r.t1).toISOString().slice(0, 10),
-        })),
-      });
-      window.__LH = { parsed, data }; // exposed for console inspection
+
+      const deriveSummary = [
+        '',
+        `<span class="ok">DERIVED</span>`,
+        `<span class="k">t0:</span> <span class="v">${new Date(data.t0).toISOString()}</span>`,
+        `<span class="k">t1:</span> <span class="v">${new Date(data.t1).toISOString()}</span>`,
+        `<span class="k">span:</span> <span class="v">${((data.t1 - data.t0) / (365.25 * 86400000)).toFixed(2)} years</span>`,
+        `<span class="k">segments (incl synth):</span> <span class="v">${data.segments.length.toLocaleString()}</span>`,
+        `<span class="k">data ranges:</span> <span class="v">${data.dataRanges.length}</span>`,
+      ];
+      for (const r of data.dataRanges) {
+        const yr = ((r.t1 - r.t0) / (365.25 * 86400000)).toFixed(2);
+        deriveSummary.push(`  ${new Date(r.t0).toISOString().slice(0,10)} → ${new Date(r.t1).toISOString().slice(0,10)} <span class="k">(${yr}y)</span>`);
+      }
+      Debug.append(deriveSummary.join('\n'));
+      console.log('[LH] derive result:', data);
+      window.__LH = { parsed, data };
       const span = fmtRange(data.t0, data.t1);
       const gaps = (data.dataRanges && data.dataRanges.length > 1) ? ` · ${data.dataRanges.length} data eras` : '';
       status.textContent = `Loaded ${span} · ${data.segments.length.toLocaleString()} trips${gaps} · ${parsed.formatsFound.join(', ')}`;
@@ -212,6 +271,7 @@
     initMap();
     wireDropZone();
     wireControls();
+    wireDebugToggle();
   }
 
   if (document.readyState === 'loading') {

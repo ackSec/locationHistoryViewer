@@ -222,6 +222,7 @@ const LHAnimate = (() => {
         }
       } catch (err) {
         console.error('[LH] tick threw — continuing loop:', err);
+        if (window.__Debug) window.__Debug.error('tick', err);
       }
       raf = requestAnimationFrame(tick);
     }
@@ -262,6 +263,7 @@ const LHAnimate = (() => {
         document.getElementById('time-read').textContent = fmtDate(state.currentTime);
       } catch (err) {
         console.error('[LH] render threw:', err);
+        if (window.__Debug) window.__Debug.error('render', err);
       }
     }
 
