@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Location Timeline</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<div id="map"></div>
+
+<div id="drop" class="drop show">
+  <div class="drop-card">
+    <h1>Location Timeline</h1>
+    <p class="sub">Drop your Google Takeout export here</p>
+    <p class="hint">Accepts <code>takeout-*.zip</code>, <code>Records.json</code>, <code>location-history.json</code>, or a folder of <code>Semantic Location History</code> JSON files.</p>
+    <label class="picker">
+      <input type="file" id="file-input" multiple accept=".zip,.json" />
+      <span>Choose files</span>
+    </label>
+    <p class="privacy">100% local. Your data never leaves this browser tab.</p>
+    <p class="load-status" id="load-status"></p>
+  </div>
+</div>
+
+<div id="hud" class="hud hidden">
+  <div class="date-box">
+    <div class="year" id="hud-year">—</div>
+    <div class="date" id="hud-date">—</div>
+  </div>
+  <div class="place" id="hud-place"></div>
+  <div class="stats">
+    <div class="stat"><span class="k">km traveled</span><span class="v" id="stat-km">0</span></div>
+    <div class="stat"><span class="k">places</span><span class="v" id="stat-places">0</span></div>
+    <div class="stat"><span class="k">countries</span><span class="v" id="stat-countries">0</span></div>
+    <div class="stat"><span class="k">flights</span><span class="v" id="stat-flights">0</span></div>
+  </div>
+</div>
+
+<div id="year-watermark" class="year-watermark hidden"></div>
+
+<div id="banner" class="banner"></div>
+
+<div id="legend" class="legend hidden">
+  <div class="legend-row"><span class="sw" style="background:#4ade80"></span>Walking</div>
+  <div class="legend-row"><span class="sw" style="background:#a3e635"></span>Running</div>
+  <div class="legend-row"><span class="sw" style="background:#22d3ee"></span>Cycling</div>
+  <div class="legend-row"><span class="sw" style="background:#fb923c"></span>Driving</div>
+  <div class="legend-row"><span class="sw" style="background:#e879f9"></span>Flying</div>
+  <div class="legend-row"><span class="sw" style="background:#94a3b8"></span>Other / unknown</div>
+  <div class="legend-row"><span class="sw dashed"></span>Signal gap</div>
+</div>
+
+<div id="controls" class="controls hidden">
+  <button class="btn play" id="btn-play" title="Play/Pause">▶</button>
+  <button class="btn" id="btn-restart" title="Restart">⟲</button>
+  <div class="speed">
+    <label>Speed</label>
+    <select id="speed">
+      <option value="86400">1 day / s</option>
+      <option value="604800">1 week / s</option>
+      <option value="2592000" selected>1 month / s</option>
+      <option value="7776000">3 months / s</option>
+      <option value="31536000">1 year / s</option>
+    </select>
+  </div>
+  <div class="cam">
+    <label>Camera</label>
+    <select id="cam-mode">
+      <option value="follow" selected>Follow</option>
+      <option value="overview">Overview</option>
+      <option value="free">Free</option>
+    </select>
+  </div>
+  <input type="range" id="scrub" min="0" max="1000" value="0" />
+  <div class="time-read" id="time-read">—</div>
+</div>
+
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="parser.js"></script>
+<script src="derive.js"></script>
+<script src="render.js"></script>
+<script src="animate.js"></script>
+<script src="app.js"></script>
+
+</body>
+</html>
