@@ -9,9 +9,10 @@
 
 const LHDerive = (() => {
 
-  const GAP_MS = 6 * 3600 * 1000;     // 6 hours of silence → gap candidate
+  const GAP_MS = 6 * 3600 * 1000;     // 6 hours of silence → gap candidate (dashed line)
   const GAP_KM = 5;                   // only draw gap line if the two endpoints are > 5 km apart
-  const BIG_GAP_MS = 30 * 86400000;   // 30 days → auto-skip during playback
+  const BIG_GAP_MS = 180 * 86400000;  // 6 months — only gaps bigger than this are auto-skip candidates
+  const BIG_GAP_FRACTION = 0.05;      // ...AND the gap must be >= 5% of the total data span
   const RAW_MIN_DT_MS = 2 * 60 * 1000;    // downsample raw pings: keep if > 2 min apart
   const RAW_MIN_KM = 0.1;                 // ... OR > 100 m apart
   const RAW_TRIP_BREAK_MS = 30 * 60 * 1000; // raw ping gap > 30 min → end current trip
@@ -136,13 +137,15 @@ const LHDerive = (() => {
       parsed.segments.sort((a, b) => a.t0 - b.t0);
     }
 
-    const starts = [];
-    const ends = [];
-    if (parsed.visits.length) { starts.push(parsed.visits[0].t0); ends.push(parsed.visits[parsed.visits.length - 1].t1); }
-    if (parsed.segments.length) { starts.push(parsed.segments[0].t0); ends.push(parsed.segments[parsed.segments.length - 1].t1); }
-    if (parsed.rawPoints.length) { starts.push(parsed.rawPoints[0].t); ends.push(parsed.rawPoints[parsed.rawPoints.length - 1].t); }
-    const t0 = starts.length ? Math.min(...starts) : 0;
-    const t1 = ends.length ? Math.max(...ends) : 0;
+    // t0 = earliest start across all data; t1 = latest END across all data.
+    // Must scan for max t1 explicitly — an earlier-starting long segment could end
+    // later than the last-starting one after sorting by t0.
+    let t0 = Infinity, t1 = -Infinity;
+    for (const v of parsed.visits) { if (v.t0 < t0) t0 = v.t0; if (v.t1 > t1) t1 = v.t1; }
+    for (const s of parsed.segments) { if (s.t0 < t0) t0 = s.t0; if (s.t1 > t1) t1 = s.t1; }
+    for (const p of parsed.rawPoints) { if (p.t < t0) t0 = p.t; if (p.t > t1) t1 = p.t; }
+    if (!isFinite(t0)) t0 = 0;
+    if (!isFinite(t1)) t1 = 0;
 
     // merged chronological timeline
     const timeline = [];
@@ -203,13 +206,18 @@ const LHDerive = (() => {
     }
 
     // Contiguous data ranges — used by the playback loop to auto-skip long empty stretches.
+    // Only splits on gaps that are BOTH longer than BIG_GAP_MS *and* a meaningful fraction
+    // of the total span. This keeps normal month-or-two vacations from fragmenting the
+    // timeline into dozens of ranges that the player would then constantly skip through.
+    const totalSpan = Math.max(1, t1 - t0);
+    const minGap = Math.max(BIG_GAP_MS, totalSpan * BIG_GAP_FRACTION);
     const dataRanges = [];
     if (timeline.length) {
       let curStart = timeline[0].t0;
       let curEnd = timeline[0].t1;
       for (let i = 1; i < timeline.length; i++) {
         const e = timeline[i];
-        if (e.t0 - curEnd > BIG_GAP_MS) {
+        if (e.t0 - curEnd > minGap) {
           dataRanges.push({ t0: curStart, t1: curEnd });
           curStart = e.t0;
           curEnd = e.t1;
