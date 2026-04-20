@@ -385,20 +385,40 @@ const LHParser = (() => {
   }
 
   // Accept a list of { name, text } file descriptors and merge everything.
-  // Returns { visits, segments, rawPoints, formatsFound, fileCount }.
+  // Returns { visits, segments, rawPoints, formatsFound, fileCount, parseErrors }.
   function parseAll(files) {
     const out = { visits: [], segments: [], rawPoints: [] };
     const formatsFound = new Set();
+    const parseErrors = [];
+    const perFileCounts = [];
     let fileCount = 0;
     for (const f of files) {
       let json;
       try { json = JSON.parse(f.text); }
-      catch { continue; }
+      catch (e) {
+        parseErrors.push({ name: f.name, bytes: f.text.length, error: String(e && e.message || e) });
+        continue;
+      }
+      const beforeRaw = out.rawPoints.length;
+      const beforeVisits = out.visits.length;
+      const beforeSegs = out.segments.length;
       const fmt = parseOne(json, out);
+      perFileCounts.push({
+        name: f.name,
+        format: fmt,
+        topLevelKeys: Object.keys(json).slice(0, 20),
+        legacyRecordsLen: Array.isArray(json.legacy_records) ? json.legacy_records.length : null,
+        timelineLen: Array.isArray(json.timeline) ? json.timeline.length : null,
+        rawAdded: out.rawPoints.length - beforeRaw,
+        visitsAdded: out.visits.length - beforeVisits,
+        segmentsAdded: out.segments.length - beforeSegs,
+      });
       if (fmt) { formatsFound.add(fmt); fileCount++; }
     }
     out.formatsFound = [...formatsFound];
     out.fileCount = fileCount;
+    out.parseErrors = parseErrors;
+    out.perFileCounts = perFileCounts;
     return out;
   }
 

@@ -41,15 +41,42 @@
       status.textContent = `Parsing ${mb} MB of JSON… (can take 10–20s on large files)`;
       await new Promise(r => setTimeout(r, 30)); // let UI paint
       const parsed = LHParser.parseAll(files);
-      if (!parsed.visits.length && !parsed.segments.length && !parsed.rawPoints.length) {
-        status.textContent = 'No location data found in these files.'; return;
+
+      // Always log what we saw — essential for debugging real files
+      console.log('[LH] parse result:', {
+        formatsFound: parsed.formatsFound,
+        rawPoints: parsed.rawPoints.length,
+        visits: parsed.visits.length,
+        segments: parsed.segments.length,
+        perFileCounts: parsed.perFileCounts,
+        parseErrors: parsed.parseErrors,
+      });
+
+      if (parsed.parseErrors && parsed.parseErrors.length) {
+        const e = parsed.parseErrors[0];
+        status.textContent = `Parse failed for ${e.name} (${(e.bytes / 1048576).toFixed(0)} MB): ${e.error}`;
+        return;
       }
-      status.textContent = `Building timeline from ${parsed.rawPoints.length.toLocaleString()} raw pings + ${parsed.visits.length.toLocaleString()} visits + ${parsed.segments.length.toLocaleString()} trips…`;
+      if (!parsed.visits.length && !parsed.segments.length && !parsed.rawPoints.length) {
+        status.textContent = 'No location data found in these files. Check console for details.'; return;
+      }
+      status.textContent = `Read ${parsed.rawPoints.length.toLocaleString()} raw pings · ${parsed.visits.length.toLocaleString()} visits · ${parsed.segments.length.toLocaleString()} trips. Building timeline…`;
       await new Promise(r => setTimeout(r, 10));
       data = LHDerive.derive(parsed);
+      console.log('[LH] derive result:', {
+        t0: new Date(data.t0).toISOString(),
+        t1: new Date(data.t1).toISOString(),
+        spanYears: ((data.t1 - data.t0) / (365.25 * 86400000)).toFixed(2),
+        segmentsTotal: data.segments.length,
+        dataRanges: data.dataRanges.map(r => ({
+          start: new Date(r.t0).toISOString().slice(0, 10),
+          end:   new Date(r.t1).toISOString().slice(0, 10),
+        })),
+      });
+      window.__LH = { parsed, data }; // exposed for console inspection
       const span = fmtRange(data.t0, data.t1);
       const gaps = (data.dataRanges && data.dataRanges.length > 1) ? ` · ${data.dataRanges.length} data eras` : '';
-      status.textContent = `Loaded ${span}${gaps} · ${parsed.formatsFound.join(', ')}`;
+      status.textContent = `Loaded ${span} · ${data.segments.length.toLocaleString()} trips${gaps} · ${parsed.formatsFound.join(', ')}`;
       await onDataLoaded();
     } catch (err) {
       console.error(err);
