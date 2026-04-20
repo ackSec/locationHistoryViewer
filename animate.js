@@ -192,69 +192,77 @@ const LHAnimate = (() => {
 
     function tick(ts) {
       if (!state.playing) return;
-      if (!lastTs) lastTs = ts;
-      const dtMs = ts - lastTs;
-      lastTs = ts;
-      const prevTime = state.currentTime;
-      // speedSec = real-world seconds covered per 1s of wall clock
-      state.currentTime = Math.min(data.t1, state.currentTime + state.speedSec * 1000 * (dtMs / 1000));
-      // Auto-skip long empty gaps: if currentTime is past the end of a data range and before
-      // the start of the next, jump to the next range's start.
-      if (data.dataRanges && data.dataRanges.length > 1) {
-        for (let i = 0; i < data.dataRanges.length - 1; i++) {
-          const here = data.dataRanges[i], next = data.dataRanges[i + 1];
-          if (state.currentTime > here.t1 && state.currentTime < next.t0) {
-            const years = ((next.t0 - here.t1) / (365.25 * 86400000)).toFixed(1);
-            state.currentTime = next.t0;
-            showBanner(fmtDate(next.t0), `Skipped ${years}-year gap`);
-            break;
+      try {
+        if (!lastTs) lastTs = ts;
+        const dtMs = ts - lastTs;
+        lastTs = ts;
+        const prevTime = state.currentTime;
+        // speedSec = real-world seconds covered per 1s of wall clock
+        state.currentTime = Math.min(data.t1, state.currentTime + state.speedSec * 1000 * (dtMs / 1000));
+        // Auto-skip long empty gaps: if currentTime is past the end of a data range and before
+        // the start of the next, jump to the next range's start.
+        if (data.dataRanges && data.dataRanges.length > 1) {
+          for (let i = 0; i < data.dataRanges.length - 1; i++) {
+            const here = data.dataRanges[i], next = data.dataRanges[i + 1];
+            if (state.currentTime > here.t1 && state.currentTime < next.t0) {
+              const years = ((next.t0 - here.t1) / (365.25 * 86400000)).toFixed(1);
+              state.currentTime = next.t0;
+              showBanner(fmtDate(next.t0), `Skipped ${years}-year gap`);
+              break;
+            }
           }
         }
-      }
-      render(prevTime);
-      if (state.currentTime >= data.t1) {
-        state.playing = false;
-        document.getElementById('btn-play').textContent = '▶';
-        document.getElementById('btn-play').classList.remove('playing');
-        return;
+        render(prevTime);
+        if (state.currentTime >= data.t1) {
+          state.playing = false;
+          document.getElementById('btn-play').textContent = '▶';
+          document.getElementById('btn-play').classList.remove('playing');
+          console.log('[LH] playback ended at', new Date(state.currentTime).toISOString(), 'data.t1=', new Date(data.t1).toISOString());
+          return;
+        }
+      } catch (err) {
+        console.error('[LH] tick threw — continuing loop:', err);
       }
       raf = requestAnimationFrame(tick);
     }
 
     function render(prevTime) {
-      LHRender.updateFrame(map, state.currentTime);
-      const idx = activeAt(data.timeline, state.currentTime);
-      let activeEntry = null;
-      let pos = null;
-      if (idx >= 0) {
-        activeEntry = data.timeline[idx];
-        if (activeEntry.t1 >= state.currentTime) {
-          if (activeEntry.kind === 'visit') {
-            const v = data.visits[activeEntry.i];
-            pos = { lat: v.lat, lng: v.lng };
+      try {
+        LHRender.updateFrame(map, state.currentTime);
+        const idx = activeAt(data.timeline, state.currentTime);
+        let activeEntry = null;
+        let pos = null;
+        if (idx >= 0) {
+          activeEntry = data.timeline[idx];
+          if (activeEntry.t1 >= state.currentTime) {
+            if (activeEntry.kind === 'visit') {
+              const v = data.visits[activeEntry.i];
+              pos = { lat: v.lat, lng: v.lng };
+            } else {
+              pos = LHDerive.positionAt(data.segments[activeEntry.i], state.currentTime);
+            }
           } else {
-            pos = LHDerive.positionAt(data.segments[activeEntry.i], state.currentTime);
+            if (activeEntry.kind === 'visit') {
+              const v = data.visits[activeEntry.i];
+              pos = { lat: v.lat, lng: v.lng };
+            } else {
+              const s = data.segments[activeEntry.i];
+              pos = { lat: s.endLat, lng: s.endLng };
+            }
+            activeEntry = null;
           }
-        } else {
-          // between entries — hold last position
-          if (activeEntry.kind === 'visit') {
-            const v = data.visits[activeEntry.i];
-            pos = { lat: v.lat, lng: v.lng };
-          } else {
-            const s = data.segments[activeEntry.i];
-            pos = { lat: s.endLat, lng: s.endLng };
-          }
-          activeEntry = null; // no current activity for HUD purposes
         }
-      }
-      LHRender.setPlayhead(map, pos);
-      updateHUD(data, state.currentTime, activeEntry);
+        LHRender.setPlayhead(map, pos);
+        updateHUD(data, state.currentTime, activeEntry);
 
-      const cam = document.getElementById('cam-mode').value;
-      updateCamera(map, pos, activeEntry, data, cam, state);
-      fireEvents(data, prevTime, state.currentTime, state);
-      syncScrubber(data, state);
-      document.getElementById('time-read').textContent = fmtDate(state.currentTime);
+        const cam = document.getElementById('cam-mode').value;
+        updateCamera(map, pos, activeEntry, data, cam, state);
+        fireEvents(data, prevTime, state.currentTime, state);
+        syncScrubber(data, state);
+        document.getElementById('time-read').textContent = fmtDate(state.currentTime);
+      } catch (err) {
+        console.error('[LH] render threw:', err);
+      }
     }
 
     function play() {
