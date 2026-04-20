@@ -249,16 +249,16 @@ const LHRender = (() => {
       },
     });
 
-    // playhead
+    // playhead — bright, pulsing, unmistakable
     map.addLayer({
       id: 'playhead-halo',
       type: 'circle',
       source: 'playhead',
       paint: {
-        'circle-radius': 28,
+        'circle-radius': 42,
         'circle-color': '#22d3ee',
-        'circle-opacity': 0.15,
-        'circle-blur': 0.8,
+        'circle-opacity': 0.18,
+        'circle-blur': 1,
       },
     });
     map.addLayer({
@@ -266,11 +266,11 @@ const LHRender = (() => {
       type: 'circle',
       source: 'playhead',
       paint: {
-        'circle-radius': 12,
+        'circle-radius': 16,
         'circle-color': 'transparent',
         'circle-stroke-color': '#22d3ee',
-        'circle-stroke-width': 1,
-        'circle-stroke-opacity': 0.7,
+        'circle-stroke-width': 1.5,
+        'circle-stroke-opacity': 0.85,
       },
     });
     map.addLayer({
@@ -278,10 +278,10 @@ const LHRender = (() => {
       type: 'circle',
       source: 'playhead',
       paint: {
-        'circle-radius': 6,
+        'circle-radius': 8,
         'circle-color': '#fff',
         'circle-stroke-color': '#22d3ee',
-        'circle-stroke-width': 2,
+        'circle-stroke-width': 2.5,
       },
     });
   }

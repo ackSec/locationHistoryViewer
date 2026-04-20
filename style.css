@@ -1,4 +1,5 @@
 * { box-sizing: border-box; }
+:root { color-scheme: dark; }
 html, body {
   margin: 0; padding: 0;
   width: 100%; height: 100%;
@@ -6,6 +7,7 @@ html, body {
   color: #e6edf3;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
   overflow: hidden;
+  forced-color-adjust: none;
 }
 
 #map { position: absolute; inset: 0; }

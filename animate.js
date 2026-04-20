@@ -30,51 +30,67 @@ const LHAnimate = (() => {
   }
 
   // ===== Camera controller =====
-  function updateCamera(map, pos, activeEntry, data, mode) {
-    if (mode === 'free' || !pos) return;
-    if (mode === 'overview') return; // user set bounds manually
+  //
+  // Design: center-follow on every frame (instant jumpTo — no animation jitter).
+  // Zoom + pitch only change when the activity context changes AND at least
+  // CAM_MIN_INTERVAL of real wall-clock time has passed since the last transition.
+  const CAM_MIN_INTERVAL_MS = 1200;
 
-    // Target zoom depends on the kind of entry:
-    //  - visit:    close (14)
-    //  - activity: varies by distance covered
-    //  - flight:   wide (3-5)
-    let targetZoom = 11;
-    let targetPitch = 40;
-
-    if (activeEntry) {
-      if (activeEntry.kind === 'segment') {
-        const s = data.segments[activeEntry.i];
-        if (s.isFlight) {
-          const km = LHDerive.haversineKm(
-            { lat: s.startLat, lng: s.startLng },
-            { lat: s.endLat,   lng: s.endLng }
-          );
-          targetZoom = km > 5000 ? 2.4 : km > 2000 ? 3.4 : km > 800 ? 4.4 : 5.4;
-          targetPitch = 0;
-        } else {
-          const km = LHDerive.haversineKm(
-            { lat: s.startLat, lng: s.startLng },
-            { lat: s.endLat,   lng: s.endLng }
-          );
-          if (s.type === 'WALKING' || s.type === 'RUNNING' || s.type === 'CYCLING') targetZoom = 14;
-          else if (km > 300) targetZoom = 7;
-          else if (km > 50) targetZoom = 9;
-          else targetZoom = 11;
-          targetPitch = 45;
-        }
-      } else if (activeEntry.kind === 'visit') {
-        targetZoom = 13;
-        targetPitch = 30;
+  function cameraTargetFor(activeEntry, data) {
+    // Default: slight overview, flat
+    let zoom = 9, pitch = 0, key = 'idle';
+    if (!activeEntry) return { zoom, pitch, key };
+    if (activeEntry.kind === 'segment') {
+      const s = data.segments[activeEntry.i];
+      if (s.isFlight) {
+        const km = LHDerive.haversineKm(
+          { lat: s.startLat, lng: s.startLng },
+          { lat: s.endLat,   lng: s.endLng }
+        );
+        zoom = km > 5000 ? 2.4 : km > 2000 ? 3.2 : km > 800 ? 4.0 : 4.8;
+        pitch = 0;
+        key = 'flight';
+      } else if (s.type === 'WALKING' || s.type === 'RUNNING' || s.type === 'CYCLING') {
+        zoom = 12; pitch = 20; key = 'local';
+      } else if (s.type === 'DRIVING' || s.type === 'BUS' || s.type === 'MOTORCYCLING') {
+        zoom = 9.5; pitch = 15; key = 'road';
+      } else {
+        zoom = 10; pitch = 10; key = 'other';
       }
+    } else if (activeEntry.kind === 'visit') {
+      zoom = 11; pitch = 15; key = 'visit';
+    }
+    return { zoom, pitch, key };
+  }
+
+  function updateCamera(map, pos, activeEntry, data, mode, state) {
+    if (mode === 'free' || !pos) return;
+    if (mode === 'overview') return;
+
+    const target = cameraTargetFor(activeEntry, data);
+    const now = performance.now();
+
+    // Center-follow every frame, but only when we're NOT mid-ease. jumpTo during
+    // an easeTo would interrupt and cancel the zoom/pitch animation.
+    if (!state._camEasing) {
+      map.jumpTo({ center: [pos.lng, pos.lat] });
     }
 
-    map.easeTo({
-      center: [pos.lng, pos.lat],
-      zoom: targetZoom,
-      pitch: targetPitch,
-      duration: 900,
-      essential: true,
-    });
+    // Trigger a zoom/pitch transition only when the scene category changes,
+    // gated by real-world time so we don't thrash.
+    if (target.key !== state._lastCamKey && (now - (state._lastCamEase || 0)) > CAM_MIN_INTERVAL_MS) {
+      state._camEasing = true;
+      map.easeTo({
+        center: [pos.lng, pos.lat],
+        zoom: target.zoom,
+        pitch: target.pitch,
+        duration: 900,
+        essential: true,
+      });
+      state._lastCamKey = target.key;
+      state._lastCamEase = now;
+      setTimeout(() => { state._camEasing = false; }, 950);
+    }
   }
 
   // ===== Banner =====
@@ -237,11 +253,7 @@ const LHAnimate = (() => {
       updateHUD(data, state.currentTime, activeEntry);
 
       const cam = document.getElementById('cam-mode').value;
-      // throttle camera updates so we don't fire easeTo every frame
-      if (!state._nextCam || state.currentTime > state._nextCam) {
-        updateCamera(map, pos, activeEntry, data, cam);
-        state._nextCam = state.currentTime + 1000 * 60 * 60 * 6; // recompute every 6h of simulated time
-      }
+      updateCamera(map, pos, activeEntry, data, cam, state);
       fireEvents(data, prevTime, state.currentTime, state);
       syncScrubber(data, state);
       document.getElementById('time-read').textContent = fmtDate(state.currentTime);

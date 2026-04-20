@@ -8,7 +8,7 @@
   const state = {
     currentTime: 0,
     playing: false,
-    speedSec: 2592000, // 1 month of simulated time per real second
+    speedSec: 604800, // 1 week of simulated time per real second (gentle default)
   };
 
   // ===== Map =====
