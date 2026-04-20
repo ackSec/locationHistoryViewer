@@ -232,7 +232,19 @@ const LHAnimate = (() => {
       const D = window.__Debug;
       let activeEntry = null, pos = null;
 
-      try { LHRender.updateFrame(map, state.currentTime); }
+      // Throttle the expensive per-feature paint updates to ~15 Hz. MapLibre chokes
+      // on a 4k+ feature source when we push 10 setPaintProperty calls per frame at
+      // 60 Hz, causing the rendered state to lag seconds (or more) behind the clock.
+      const now = performance.now();
+      const paintDue = !state._lastPaintTs || (now - state._lastPaintTs) >= 66
+        || state.currentTime >= data.t1
+        || state.currentTime <= data.t0 + 1;
+      try {
+        if (paintDue) {
+          LHRender.updateFrame(map, state.currentTime);
+          state._lastPaintTs = now;
+        }
+      }
       catch (e) { if (D) D.error('updateFrame', e); }
 
       try {

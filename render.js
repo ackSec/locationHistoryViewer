@@ -297,36 +297,26 @@ const LHRender = (() => {
 
   // === Per-frame updates ===
 
-  // Build a time-driven opacity expression for the trail / arc layer.
-  // Active segments are bright; finished segments fade with age; future segments are hidden.
+  // Simplified opacity expression: visible after t0, fully opaque while active,
+  // drops to a dim "history" level after t1. Avoids the per-feature interpolate
+  // across two time domains which was expensive to evaluate for 4k+ features
+  // 60 times per second.
   function trailOpacityExpr(currentTime, opts = {}) {
-    const fadeShort = opts.fadeShort || 1000 * 60 * 60 * 24 * 30;    // 30d: 0.9 → 0.45
-    const fadeLong  = opts.fadeLong  || 1000 * 60 * 60 * 24 * 365;   // 1y:  → 0.22
-    const floor     = opts.floor     || 0.18;
-    const activeOpacity = opts.active || 0.95;
+    const active = opts.active || 0.95;
+    const past   = opts.past   || 0.38;
     return [
       'case',
       ['>', ['get', 't0'], currentTime], 0,
-      ['<=', ['get', 't1'], currentTime],
-        ['interpolate', ['linear'], ['-', currentTime, ['get', 't1']],
-          0,         activeOpacity,
-          fadeShort, 0.45,
-          fadeLong,  floor,
-        ],
-      activeOpacity,
+      ['<=', ['get', 't1'], currentTime], past,
+      active,
     ];
   }
 
   function visitOpacityExpr(currentTime) {
-    const fadeShort = 1000 * 60 * 60 * 24 * 30;
     return [
       'case',
       ['>', ['get', 't0'], currentTime], 0,
-      ['<=', ['get', 't1'], currentTime],
-        ['interpolate', ['linear'], ['-', currentTime, ['get', 't1']],
-          0,         0.9,
-          fadeShort, 0.45,
-        ],
+      ['<=', ['get', 't1'], currentTime], 0.5,
       1.0,
     ];
   }
