@@ -208,6 +208,7 @@ const LHAnimate = (() => {
               const years = ((next.t0 - here.t1) / (365.25 * 86400000)).toFixed(1);
               state.currentTime = next.t0;
               showBanner(fmtDate(next.t0), `Skipped ${years}-year gap`);
+              if (window.__Debug) window.__Debug.info(`auto-skip: ${new Date(here.t1).toISOString().slice(0,10)} → ${new Date(next.t0).toISOString().slice(0,10)} (${years}y)`);
               break;
             }
           }
@@ -217,7 +218,7 @@ const LHAnimate = (() => {
           state.playing = false;
           document.getElementById('btn-play').textContent = '▶';
           document.getElementById('btn-play').classList.remove('playing');
-          console.log('[LH] playback ended at', new Date(state.currentTime).toISOString(), 'data.t1=', new Date(data.t1).toISOString());
+          if (window.__Debug) window.__Debug.info(`playback ended at ${new Date(state.currentTime).toISOString().slice(0,19)}Z`);
           return;
         }
       } catch (err) {
@@ -228,43 +229,59 @@ const LHAnimate = (() => {
     }
 
     function render(prevTime) {
+      const D = window.__Debug;
+      let activeEntry = null, pos = null;
+
+      try { LHRender.updateFrame(map, state.currentTime); }
+      catch (e) { if (D) D.error('updateFrame', e); }
+
       try {
-        LHRender.updateFrame(map, state.currentTime);
         const idx = activeAt(data.timeline, state.currentTime);
-        let activeEntry = null;
-        let pos = null;
         if (idx >= 0) {
-          activeEntry = data.timeline[idx];
-          if (activeEntry.t1 >= state.currentTime) {
-            if (activeEntry.kind === 'visit') {
-              const v = data.visits[activeEntry.i];
+          const e = data.timeline[idx];
+          if (e && e.t1 >= state.currentTime) {
+            activeEntry = e;
+            if (e.kind === 'visit') {
+              const v = data.visits[e.i];
               pos = { lat: v.lat, lng: v.lng };
             } else {
-              pos = LHDerive.positionAt(data.segments[activeEntry.i], state.currentTime);
+              pos = LHDerive.positionAt(data.segments[e.i], state.currentTime);
             }
-          } else {
-            if (activeEntry.kind === 'visit') {
-              const v = data.visits[activeEntry.i];
+          } else if (e) {
+            if (e.kind === 'visit') {
+              const v = data.visits[e.i];
               pos = { lat: v.lat, lng: v.lng };
             } else {
-              const s = data.segments[activeEntry.i];
+              const s = data.segments[e.i];
               pos = { lat: s.endLat, lng: s.endLng };
             }
-            activeEntry = null;
           }
         }
-        LHRender.setPlayhead(map, pos);
-        updateHUD(data, state.currentTime, activeEntry);
+      } catch (e) { if (D) D.error('activeEntry/pos', e); }
 
-        const cam = document.getElementById('cam-mode').value;
+      try { LHRender.setPlayhead(map, pos); }
+      catch (e) { if (D) D.error('setPlayhead', e); }
+
+      try { updateHUD(data, state.currentTime, activeEntry); }
+      catch (e) { if (D) D.error('updateHUD', e); }
+
+      try {
+        const camEl = document.getElementById('cam-mode');
+        const cam = camEl ? camEl.value : 'world';
         updateCamera(map, pos, activeEntry, data, cam, state);
-        fireEvents(data, prevTime, state.currentTime, state);
+      } catch (e) { if (D) D.error('updateCamera', e); }
+
+      try { fireEvents(data, prevTime, state.currentTime, state); }
+      catch (e) { if (D) D.error('fireEvents', e); }
+
+      try {
         syncScrubber(data, state);
-        document.getElementById('time-read').textContent = fmtDate(state.currentTime);
-      } catch (err) {
-        console.error('[LH] render threw:', err);
-        if (window.__Debug) window.__Debug.error('render', err);
-      }
+        const tr = document.getElementById('time-read');
+        if (tr) tr.textContent = fmtDate(state.currentTime);
+      } catch (e) { if (D) D.error('scrubber', e); }
+
+      // Telemetry line at the bottom of the debug panel.
+      if (D && D.setTelemetry) D.setTelemetry(state, data);
     }
 
     function play() {

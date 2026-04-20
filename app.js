@@ -16,24 +16,53 @@
   const Debug = {
     lines: [],
     errCount: 0,
-    set(html) {
-      const el = document.getElementById('debug-body');
-      if (el) el.innerHTML = html;
-    },
+    errCounts: {},
+    fixed: '', // pinned top section (parse/derive summary)
+    tele: '',  // pinned bottom section (live telemetry)
+    frameCount: 0,
+    lastFpsT: 0,
+    fps: 0,
+    set(html) { this.fixed = html; this._render(); },
     append(html) {
       this.lines.push(html);
-      if (this.lines.length > 30) this.lines.shift();
-      const el = document.getElementById('debug-body');
-      if (el) el.innerHTML = this.lines.join('\n');
+      if (this.lines.length > 12) this.lines.shift();
+      this._render();
     },
     error(where, err) {
       this.errCount++;
-      const msg = err && err.stack ? err.stack.split('\n').slice(0, 4).join('\n') : String(err);
-      const line = `<span class="err">[ERR ${this.errCount}] ${escapeHtml(where)}:</span>\n${escapeHtml(msg)}`;
-      this.append(line);
+      this.errCounts[where] = (this.errCounts[where] || 0) + 1;
+      // only append the first 3 occurrences of each step to avoid spam
+      if (this.errCounts[where] <= 3) {
+        const msg = err && err.stack ? err.stack.split('\n').slice(0, 4).join('\n') : String(err);
+        this.append(`<span class="err">[ERR ${this.errCount}] ${escapeHtml(where)}#${this.errCounts[where]}:</span>\n${escapeHtml(msg)}`);
+      }
+      this._render();
     },
-    info(line) {
-      this.append(`<span class="k">${escapeHtml(line)}</span>`);
+    info(line) { this.append(`<span class="k">${escapeHtml(line)}</span>`); },
+    setTelemetry(state, data) {
+      const now = performance.now();
+      this.frameCount++;
+      if (now - this.lastFpsT > 500) {
+        this.fps = Math.round(this.frameCount * 1000 / (now - this.lastFpsT));
+        this.frameCount = 0;
+        this.lastFpsT = now;
+      }
+      const pct = data && data.t1 > data.t0
+        ? (((state.currentTime - data.t0) / (data.t1 - data.t0)) * 100).toFixed(1)
+        : '0';
+      const errSummary = Object.keys(this.errCounts).length
+        ? ' · err: ' + Object.entries(this.errCounts).map(([k, v]) => `${k}×${v}`).join(' ')
+        : '';
+      this.tele =
+        `<span class="k">--- LIVE ---</span>\n` +
+        `<span class="k">time:</span> <span class="v">${new Date(state.currentTime).toISOString().slice(0, 19)}Z</span> <span class="k">(${pct}%)</span>\n` +
+        `<span class="k">playing:</span> <span class="v">${state.playing}</span>  <span class="k">fps:</span> <span class="v">${this.fps}</span>${errSummary}`;
+      this._render();
+    },
+    _render() {
+      const el = document.getElementById('debug-body');
+      if (!el) return;
+      el.innerHTML = [this.fixed, ...this.lines, this.tele].filter(Boolean).join('\n');
     },
   };
   window.__Debug = Debug;
