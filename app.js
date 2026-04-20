@@ -19,14 +19,22 @@
     errCounts: {},
     fixed: '', // pinned top section (parse/derive summary)
     tele: '',  // pinned bottom section (live telemetry)
-    frameCount: 0,
+    renderFrames: 0,
     lastFpsT: 0,
     fps: 0,
+    lastInfoLine: '',
     set(html) { this.fixed = html; this._render(); },
     append(html) {
+      // Dedupe consecutive identical lines
+      if (html === this.lastInfoLine) return;
+      this.lastInfoLine = html;
       this.lines.push(html);
       if (this.lines.length > 12) this.lines.shift();
       this._render();
+    },
+    tickRenderFrame() {
+      // Called from the real render loop only — NOT the 250 ms heartbeat.
+      this.renderFrames++;
     },
     error(where, err) {
       this.errCount++;
@@ -41,10 +49,9 @@
     info(line) { this.append(`<span class="k">${escapeHtml(line)}</span>`); },
     setTelemetry(state, data) {
       const now = performance.now();
-      this.frameCount++;
       if (now - this.lastFpsT > 500) {
-        this.fps = Math.round(this.frameCount * 1000 / (now - this.lastFpsT));
-        this.frameCount = 0;
+        this.fps = Math.round(this.renderFrames * 1000 / (now - this.lastFpsT));
+        this.renderFrames = 0;
         this.lastFpsT = now;
       }
       const pct = data && data.t1 > data.t0

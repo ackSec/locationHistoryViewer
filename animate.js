@@ -280,8 +280,7 @@ const LHAnimate = (() => {
         if (tr) tr.textContent = fmtDate(state.currentTime);
       } catch (e) { if (D) D.error('scrubber', e); }
 
-      // Telemetry line at the bottom of the debug panel.
-      if (D && D.setTelemetry) D.setTelemetry(state, data);
+      if (D && D.tickRenderFrame) D.tickRenderFrame();
     }
 
     function play() {
