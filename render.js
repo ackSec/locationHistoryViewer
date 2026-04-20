@@ -193,9 +193,9 @@ const LHRender = (() => {
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': typeColorExpr,
-        'line-width': 7,
+        'line-width': 10,
         'line-opacity': 0,
-        'line-blur': 4,
+        'line-blur': 5,
       },
     });
     map.addLayer({
@@ -205,7 +205,7 @@ const LHRender = (() => {
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': typeColorExpr,
-        'line-width': 2,
+        'line-width': 2.5,
         'line-opacity': 0,
       },
     });
@@ -249,15 +249,15 @@ const LHRender = (() => {
       },
     });
 
-    // playhead — bright, pulsing, unmistakable
+    // playhead — bright, pulsing, unmistakable at world zoom
     map.addLayer({
       id: 'playhead-halo',
       type: 'circle',
       source: 'playhead',
       paint: {
-        'circle-radius': 42,
+        'circle-radius': 55,
         'circle-color': '#22d3ee',
-        'circle-opacity': 0.18,
+        'circle-opacity': 0.22,
         'circle-blur': 1,
       },
     });
@@ -266,11 +266,11 @@ const LHRender = (() => {
       type: 'circle',
       source: 'playhead',
       paint: {
-        'circle-radius': 16,
+        'circle-radius': 22,
         'circle-color': 'transparent',
         'circle-stroke-color': '#22d3ee',
-        'circle-stroke-width': 1.5,
-        'circle-stroke-opacity': 0.85,
+        'circle-stroke-width': 2,
+        'circle-stroke-opacity': 0.9,
       },
     });
     map.addLayer({
@@ -278,10 +278,10 @@ const LHRender = (() => {
       type: 'circle',
       source: 'playhead',
       paint: {
-        'circle-radius': 8,
+        'circle-radius': 10,
         'circle-color': '#fff',
         'circle-stroke-color': '#22d3ee',
-        'circle-stroke-width': 2.5,
+        'circle-stroke-width': 3,
       },
     });
   }

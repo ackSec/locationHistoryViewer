@@ -76,7 +76,7 @@
 
     // Fit map to data bounds, then hide drop zone and show UI
     const bounds = computeBounds(data);
-    if (bounds) map.fitBounds(bounds, { padding: 60, duration: 0 });
+    if (bounds) map.fitBounds(bounds, { padding: 80, duration: 0, pitch: 0, bearing: 0 });
 
     state.currentTime = data.t0;
     controller = LHAnimate.createController(map, data, state);
@@ -104,6 +104,12 @@
     for (const s of d.segments) { push(s.startLat, s.startLng); push(s.endLat, s.endLng); }
     if (!any) return null;
     return [[minLng, minLat], [maxLng, maxLat]];
+  }
+
+  function fitWorld() {
+    if (!data) return;
+    const bounds = computeBounds(data);
+    if (bounds) map.fitBounds(bounds, { padding: 80, duration: 600, pitch: 0, bearing: 0 });
   }
 
   // ===== UI wiring =====
@@ -135,6 +141,13 @@
     const btnRestart = document.getElementById('btn-restart');
     const speed = document.getElementById('speed');
     const scrub = document.getElementById('scrub');
+    const camMode = document.getElementById('cam-mode');
+
+    camMode.addEventListener('change', () => {
+      // Reset any in-flight follow-mode easing state, and re-fit bounds when
+      // the user asks for world view.
+      if (camMode.value === 'world') fitWorld();
+    });
 
     btnPlay.addEventListener('click', () => {
       if (!controller) return;

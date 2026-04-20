@@ -64,20 +64,18 @@ const LHAnimate = (() => {
   }
 
   function updateCamera(map, pos, activeEntry, data, mode, state) {
-    if (mode === 'free' || !pos) return;
-    if (mode === 'overview') return;
+    // World mode: the camera is set once to the data extent and never moves
+    // afterwards. No thrashing, no re-projection churn.
+    if (mode === 'world' || mode === 'free' || !pos) return;
 
+    // Follow mode: smooth center tracking + category-gated zoom/pitch changes.
     const target = cameraTargetFor(activeEntry, data);
     const now = performance.now();
 
-    // Center-follow every frame, but only when we're NOT mid-ease. jumpTo during
-    // an easeTo would interrupt and cancel the zoom/pitch animation.
     if (!state._camEasing) {
       map.jumpTo({ center: [pos.lng, pos.lat] });
     }
 
-    // Trigger a zoom/pitch transition only when the scene category changes,
-    // gated by real-world time so we don't thrash.
     if (target.key !== state._lastCamKey && (now - (state._lastCamEase || 0)) > CAM_MIN_INTERVAL_MS) {
       state._camEasing = true;
       map.easeTo({
