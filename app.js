@@ -266,10 +266,12 @@
 
     btnPlay.addEventListener('click', () => {
       if (!controller) return;
-      if (state.playing) controller.pause(); else controller.play();
+      if (state.playing) { Debug.info('pause clicked'); controller.pause(); }
+      else { Debug.info('play clicked'); controller.play(); }
     });
     btnRestart.addEventListener('click', () => {
       if (!controller) return;
+      Debug.info('restart clicked');
       controller.restart();
     });
     speed.addEventListener('change', () => {
@@ -277,12 +279,8 @@
     });
     scrub.addEventListener('input', () => {
       if (!controller || !data) return;
-      scrub.dataset.dragging = '1';
       const f = parseFloat(scrub.value) / 1000;
       controller.seek(data.t0 + f * (data.t1 - data.t0));
-    });
-    scrub.addEventListener('change', () => {
-      scrub.dataset.dragging = '0';
     });
 
     // keyboard shortcuts
@@ -301,6 +299,12 @@
     wireDropZone();
     wireControls();
     wireDebugToggle();
+    // Independent telemetry heartbeat so the LIVE line stays current even when
+    // playback is paused or at end-of-timeline (the render loop stops firing
+    // in those cases, which used to make the panel go stale).
+    setInterval(() => {
+      if (data) Debug.setTelemetry(state, data);
+    }, 250);
   }
 
   if (document.readyState === 'loading') {

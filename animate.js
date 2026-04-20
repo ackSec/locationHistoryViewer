@@ -313,9 +313,11 @@ const LHAnimate = (() => {
 
   function syncScrubber(data, state) {
     const scrub = document.getElementById('scrub');
-    if (!scrub || scrub.dataset.dragging === '1') return;
+    if (!scrub) return;
+    // Always sync — skipping during drag caused the scrubber to decouple from
+    // the clock whenever a mouseup/change event failed to fire.
     const f = (state.currentTime - data.t0) / Math.max(1, data.t1 - data.t0);
-    scrub.value = Math.round(f * 1000);
+    scrub.value = Math.round(Math.max(0, Math.min(1, f)) * 1000);
   }
 
   return { createController, showBanner, fmtDate, activeAt };
